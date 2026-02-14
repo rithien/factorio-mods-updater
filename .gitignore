@@ -1,0 +1,4 @@
+config.json
+mods_list.json
+*.pyc
+__pycache__/
