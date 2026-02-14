@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
     "mods_api_url": "https://mods.factorio.com/api/mods?page_size=max&full=True&version={version}&is_space_age=true",
     "mod_packs_path": "./mod-packs.json",
     "mods_dir": "<FILL IN - path to mods folder>",
-    "factorio_version_file": "<FILL IN - path to base-info.json>",
+    "factorio_version_file": "<FILL IN - path to ./factorio/2.0.73/data/base/info.json>",
     "username": "<FILL IN>",
     "token": "<FILL IN>",
 }

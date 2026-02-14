@@ -23,7 +23,7 @@ On first run the script will create a `config.json` file with default values. Fi
     "mods_api_url": "https://mods.factorio.com/api/mods?page_size=max&full=True&version={version}&is_space_age=true",
     "mod_packs_path": "./mod-packs.json",
     "mods_dir": "/path/to/mods/folder",
-    "factorio_version_file": "/path/to/base-info.json",
+    "factorio_version_file": "./factorio/2.0.73/data/base/info.json",
     "username": "your_username",
     "token": "your_token"
 }
