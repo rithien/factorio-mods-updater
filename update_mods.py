@@ -7,6 +7,7 @@ import tempfile
 import time
 import urllib.request
 import urllib.error
+import subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
@@ -23,6 +24,7 @@ DEFAULT_CONFIG = {
     "factorio_version_file": "<FILL IN - path to ./factorio/2.0.73/data/base/info.json>",
     "username": "<FILL IN>",
     "token": "<FILL IN>",
+    "clusterio_restart": "sudo systemctl restart clusteriocontroller"
 }
 
 
@@ -199,7 +201,8 @@ def download_mod(download_url, file_name, tmp_dir, username, token):
 
 
 def find_updates(packs, mods_index, factorio_version):
-    updates = []
+    """Return dict mod_name -> update info for mods that need updating in any pack."""
+    updates = {}
     for pack in packs:
         pack_fv = pack.get("factorio_version", "")
         pack_fv_major_minor = ".".join(pack_fv.split(".")[:2])
@@ -224,32 +227,46 @@ def find_updates(packs, mods_index, factorio_version):
             remote_sha1 = latest.get("sha1", "")
 
             if local_version != remote_version or local_sha1 != remote_sha1:
-                updates.append({
+                if mod_name not in updates:
+                    updates[mod_name] = {
+                        "mod_name": mod_name,
+                        "new_version": remote_version,
+                        "new_sha1": remote_sha1,
+                        "download_url": latest.get("download_url", ""),
+                        "file_name": latest.get("file_name", ""),
+                        "packs": [],
+                    }
+                updates[mod_name]["packs"].append({
                     "pack_name": pack.get("name"),
-                    "mod_name": mod_name,
                     "old_version": local_version,
-                    "new_version": remote_version,
-                    "new_sha1": remote_sha1,
-                    "download_url": latest.get("download_url", ""),
-                    "file_name": latest.get("file_name", ""),
                 })
 
     return updates
 
 
-def apply_updates(packs, successful_mods):
+def apply_updates(packs, successful_mods, factorio_version):
+    """Update all mod entries across all matching packs."""
     now_ms = int(time.time() * 1000)
     updated_packs = 0
 
     for pack in packs:
+        pack_fv = pack.get("factorio_version", "")
+        pack_fv_major_minor = ".".join(pack_fv.split(".")[:2])
+        if pack_fv_major_minor != factorio_version:
+            continue
+
         pack_changed = False
         for mod in pack.get("mods", []):
             mod_name = mod.get("name", "")
             if mod_name in successful_mods:
                 info = successful_mods[mod_name]
-                mod["version"] = info["new_version"]
-                mod["sha1"] = info["new_sha1"]
-                pack_changed = True
+                old_ver = mod.get("version", "")
+                new_ver = info["new_version"]
+                if old_ver != new_ver or mod.get("sha1", "") != info["new_sha1"]:
+                    mod["version"] = new_ver
+                    mod["sha1"] = info["new_sha1"]
+                    pack_changed = True
+                    log.info("  [%s] %s: %s -> %s", pack.get("name"), mod_name, old_ver, new_ver)
 
         if pack_changed:
             pack["updated_at_ms"] = now_ms
@@ -284,9 +301,10 @@ def main():
         log.info("No updates - all mods are up to date")
         return
 
-    log.info("Found %d updates:", len(updates))
-    for u in updates:
-        log.info("  %s: %s -> %s (pack: %s)", u["mod_name"], u["old_version"], u["new_version"], u["pack_name"])
+    log.info("Found %d mod(s) to update:", len(updates))
+    for mod_name, info in updates.items():
+        for p in info["packs"]:
+            log.info("  %s: %s -> %s (pack: %s)", mod_name, p["old_version"], info["new_version"], p["pack_name"])
 
     # Download to temporary folder
     tmp_dir = tempfile.mkdtemp(prefix="factorio-mods-")
@@ -294,43 +312,48 @@ def main():
 
     # mod_name -> update info (only successfully downloaded)
     successful = {}
-    # file_name -> tmp_path (unique files to move)
-    downloaded_files = {}
 
     try:
-        for u in updates:
-            file_name = u["file_name"]
-            mod_name = u["mod_name"]
-
-            if file_name not in downloaded_files:
-                try:
-                    tmp_path = download_mod(u["download_url"], file_name, tmp_dir, username, token)
-                    downloaded_files[file_name] = tmp_path
-                except (urllib.error.URLError, OSError, RuntimeError) as e:
-                    log.error("Failed to download %s: %s", mod_name, e)
-                    continue
-
-            if file_name in downloaded_files:
-                successful[mod_name] = u
+        for mod_name, info in updates.items():
+            file_name = info["file_name"]
+            try:
+                tmp_path = download_mod(info["download_url"], file_name, tmp_dir, username, token)
+                successful[mod_name] = info
+            except (urllib.error.URLError, OSError, RuntimeError) as e:
+                log.error("Failed to download %s: %s", mod_name, e)
 
         if not successful:
             log.error("No mods were downloaded successfully")
             return
 
         # Move from temp to mods_dir
-        for file_name, tmp_path in downloaded_files.items():
-            dest = os.path.join(mods_dir, file_name)
-            shutil.move(tmp_path, dest)
-            log.info("Moved: %s -> %s", file_name, dest)
+        for mod_name, info in successful.items():
+            src = os.path.join(tmp_dir, info["file_name"])
+            dest = os.path.join(mods_dir, info["file_name"])
+            shutil.move(src, dest)
+            log.info("Moved: %s -> %s", info["file_name"], dest)
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Archive and update mod-packs.json
     archive_mod_packs(mod_packs_path)
-    updated_packs = apply_updates(packs, successful)
+    log.info("Applying updates to all packs:")
+    updated_packs = apply_updates(packs, successful, factorio_version)
     save_mod_packs(mod_packs_path, packs)
-    log.info("Updated mod-packs.json (%d mods, %d packs)", len(successful), updated_packs)
+    log.info("Updated mod-packs.json (%d mod(s), %d pack(s))", len(successful), updated_packs)
+
+    # ---------------------------------------------------------
+    # Restart Clusterio if configured
+    # ---------------------------------------------------------
+    restart_cmd = config.get("clusterio_restart")
+    if restart_cmd:
+        log.info("Executing restart command: %s", restart_cmd)
+        try:
+            subprocess.run(restart_cmd, shell=True, check=True)
+            log.info("Restart command executed successfully.")
+        except subprocess.CalledProcessError as e:
+            log.error("Restart command failed with exit code %s", e.returncode)
 
 
 if __name__ == "__main__":
