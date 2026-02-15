@@ -25,7 +25,8 @@ On first run the script will create a `config.json` file with default values. Fi
     "mods_dir": "/path/to/mods/folder",
     "factorio_version_file": "./factorio/2.0.73/data/base/info.json",
     "username": "your_username",
-    "token": "your_token"
+    "token": "your_token",
+    "clusterio_restart": "sudo systemctl restart clusteriocontroller"
 }
 ```
 
@@ -37,6 +38,7 @@ On first run the script will create a `config.json` file with default values. Fi
 | `factorio_version_file` | Path to the `base-info.json` file containing the Factorio version |
 | `username` | factorio.com username |
 | `token` | factorio.com authorization token |
+| `clusterio_restart` | Command to restart Clusterio after update (optional) |
 
 You can find your token at: https://factorio.com/profile
 
